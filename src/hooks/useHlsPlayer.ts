@@ -5,12 +5,14 @@ import type HlsClass from 'hls.js';
 interface UseHlsPlayerOptions {
   onTimeUpdate?: (time: number, duration: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
+  onAuthFailed?: () => void;
   initialTime?: number;
   previewLimit?: number;
+  playToken?: string | null;
 }
 
 export function useHlsPlayer(src: string, options: UseHlsPlayerOptions = {}) {
-  const { onTimeUpdate, onPlayStateChange, initialTime = 0, previewLimit } = options;
+  const { onTimeUpdate, onPlayStateChange, onAuthFailed, initialTime = 0, previewLimit, playToken } = options;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<HlsClass | null>(null);
@@ -78,6 +80,11 @@ export function useHlsPlayer(src: string, options: UseHlsPlayerOptions = {}) {
           enableWorker: true,
           lowLatencyMode: false,
           maxBufferLength: 30,
+          xhrSetup: (xhr, url) => {
+            if (playToken && url.includes('/stream/')) {
+              xhr.setRequestHeader('x-play-token', playToken);
+            }
+          },
         });
         hls.loadSource(realSrc);
         hls.attachMedia(video);
@@ -88,6 +95,13 @@ export function useHlsPlayer(src: string, options: UseHlsPlayerOptions = {}) {
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
+                if (data.response?.code === 401 || data.response?.code === 403) {
+                  console.warn('HLS auth failed, triggering onAuthFailed');
+                  onAuthFailed?.();
+                  setError('播放鉴权已过期，请重新验证');
+                  setIsLoading(false);
+                  return;
+                }
                 try { hls.startLoad(); } catch {}
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
@@ -103,6 +117,15 @@ export function useHlsPlayer(src: string, options: UseHlsPlayerOptions = {}) {
         hlsRef.current = hls;
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = realSrc;
+        if (playToken && video.src.includes('/stream/')) {
+          const origOpen = XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.open = function(method: string, url: string) {
+            origOpen.call(this, method, url);
+            if (url.includes('/stream/')) {
+              this.setRequestHeader('x-play-token', playToken);
+            }
+          };
+        }
         const onMeta = () => { setIsLoading(false); };
         video.addEventListener('loadedmetadata', onMeta, { once: true });
       } else {
@@ -198,7 +221,7 @@ export function useHlsPlayer(src: string, options: UseHlsPlayerOptions = {}) {
         hlsRef.current = null;
       }
     };
-  }, [src, initialTime, previewLimit, onTimeUpdate, onPlayStateChange]);
+  }, [src, initialTime, previewLimit, playToken, onTimeUpdate, onPlayStateChange, onAuthFailed]);
 
   return {
     videoRef,

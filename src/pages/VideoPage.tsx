@@ -16,7 +16,7 @@ import {
 } from '../api/video.api';
 import type { Video, Danmaku, PlayAuthToken } from '../../shared/types';
 import { formatCompactNumber, formatDuration, formatDate, formatTokenExpiry } from '../utils/format';
-import { getPlayToken, savePlayToken } from '../utils/token';
+import { getPlayToken, savePlayToken, clearPlayToken } from '../utils/token';
 import clsx from 'clsx';
 import VideoCard from '../components/layout/VideoCard';
 
@@ -51,9 +51,12 @@ export default function VideoPage() {
     if (!videoId) return;
     setLoading(true);
     setError(null);
+    setPlayToken(null);
+
     try {
+      const cachedForDetail = getPlayToken(videoId);
       const [detailRes, danmakuRes] = await Promise.all([
-        getVideoDetail(videoId),
+        getVideoDetail(videoId, cachedForDetail?.token),
         getDanmakuList(videoId),
       ]);
       setVideo(detailRes.video);
@@ -63,32 +66,60 @@ export default function VideoPage() {
         setRelatedVideos(detailRes.related);
       }
 
+      let serverPurchased = false;
+      let serverPlayToken: PlayAuthToken | null = null;
+
       if (detailRes.video.isPaid) {
         const cached = getPlayToken(videoId);
-        if (cached && cached.expiresAt > Date.now()) {
-          setPlayToken({ videoId, token: cached.token, expiresAt: cached.expiresAt });
-        } else {
-          try {
-            const info = await getVideoPlayInfo(videoId);
-            if (info.playToken && info.playToken.expiresAt > Date.now()) {
-              setPlayToken(info.playToken);
-              savePlayToken(info.playToken);
+        let info;
+
+        try {
+          info = await getVideoPlayInfo(videoId, cached?.token);
+          serverPurchased = !!info.purchased;
+
+          if (info.playToken && info.playToken.expiresAt > Date.now()) {
+            serverPlayToken = info.playToken;
+            savePlayToken(info.playToken);
+          } else if (cached && cached.expiresAt > Date.now()) {
+            try {
+              const verifyInfo = await getVideoPlayInfo(videoId, cached.token);
+              if (verifyInfo.playToken && verifyInfo.playToken.expiresAt > Date.now()) {
+                serverPlayToken = verifyInfo.playToken;
+                savePlayToken(verifyInfo.playToken);
+                serverPurchased = true;
+              } else {
+                clearPlayToken(videoId);
+              }
+            } catch {
+              clearPlayToken(videoId);
             }
-          } catch {}
+          }
+        } catch {
+          clearPlayToken(videoId);
+        }
+
+        if (serverPlayToken && serverPlayToken.expiresAt > Date.now()) {
+          setPlayToken(serverPlayToken);
+        } else {
+          clearPlayToken(videoId);
+          setPlayToken(null);
         }
       }
 
       if (isAuthenticated) {
+        const cachedForLike = getPlayToken(videoId);
         try {
           const prog = await getProgress(videoId);
           if (prog && prog.position > 5 && prog.position < (detailRes.video.duration || 999999) - 10) {
-            setInitialTime(prog.position);
-            setShowResumeToast(true);
-            setTimeout(() => setShowResumeToast(false), 4000);
+            if (!serverPurchased || prog.position <= 60) {
+              setInitialTime(prog.position);
+              setShowResumeToast(true);
+              setTimeout(() => setShowResumeToast(false), 4000);
+            }
           }
         } catch {}
         try {
-          const info = await getVideoPlayInfo(videoId);
+          const info = await getVideoPlayInfo(videoId, cachedForLike?.token);
           setLiked(info.liked || false);
         } catch {}
       }
@@ -122,6 +153,12 @@ export default function VideoPage() {
     return unsub;
   }, [videoId, onMessage]);
 
+  const handleAuthFailed = useCallback(() => {
+    clearPlayToken(videoId);
+    setPlayToken(null);
+    setShowPaywall(true);
+  }, [videoId]);
+
   const handleTimeUpdate = useCallback((time: number, dur: number) => {
     lastTimeRef.current = time;
     durationRef.current = dur;
@@ -152,6 +189,16 @@ export default function VideoPage() {
     const res = await purchaseVideo(videoId, method);
     setPlayToken(res);
     savePlayToken(res);
+
+    setTimeout(async () => {
+      try {
+        const refreshRes = await getVideoDetail(videoId, res.token);
+        if (refreshRes.video) {
+          setVideo(refreshRes.video);
+        }
+      } catch {}
+    }, 300);
+
     return res;
   }, [videoId]);
 
@@ -226,6 +273,7 @@ export default function VideoPage() {
               previewLimit={effectivePreview}
               onTimeUpdate={handleTimeUpdate}
               onPreviewReached={handlePreviewReached}
+              onAuthFailed={handleAuthFailed}
             />
             <DanmakuInput
               currentTime={lastTimeRef.current}

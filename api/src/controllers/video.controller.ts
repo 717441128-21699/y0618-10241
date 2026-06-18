@@ -6,11 +6,11 @@ import { fileURLToPath } from 'url';
 import * as videoRepo from '../repositories/video.repo.js';
 import * as progressRepo from '../repositories/progress.repo.js';
 import * as danmakuRepo from '../repositories/danmaku.repo.js';
-import type { AuthenticatedRequest, optionalAuthMiddleware } from '../middleware/auth.js';
-import { authMiddleware } from '../middleware/auth.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
+import { authMiddleware, optionalAuthMiddleware, verifyPlayToken } from '../middleware/auth.js';
 import { submitTranscode, getTaskProgress } from '../services/transcode.service.js';
 import { purchaseVideo, hasValidPlayToken } from '../services/payment.service.js';
-import type { Video, VideoCategory } from '../../../shared/types.js';
+import type { Video, VideoCategory, PlayAuthToken } from '../../../shared/types.js';
 import { broadcastMessage } from '../websocket.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,14 +46,43 @@ router.get('/featured', (_req, res) => {
   res.json({ featured, recommended: all.slice(3) });
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuthMiddleware, (req: AuthenticatedRequest, res) => {
   const id = parseInt(req.params.id, 10);
   const video = videoRepo.findVideoById(id);
   if (!video) return res.status(404).json({ error: '视频不存在' });
   videoRepo.incrementViewCount(id);
-  const updated = videoRepo.findVideoById(id)!;
+  let updated = videoRepo.findVideoById(id)!;
   const all = videoRepo.findAllVideos({ limit: 14 });
   const related = all.filter((v) => v.id !== id).slice(0, 12);
+
+  if (updated.isPaid) {
+    const userId = req.userId;
+    let hasAccess = false;
+
+    if (userId) {
+      const existing = hasValidPlayToken(userId, id);
+      if (existing) hasAccess = true;
+    }
+
+    const authHeader = req.headers['x-play-token'] as string | undefined;
+    if (authHeader) {
+      const vResult = verifyPlayToken(authHeader);
+      if (vResult.valid && vResult.videoId === id) hasAccess = true;
+    }
+
+    if (!hasAccess) {
+      updated = {
+        ...updated,
+        hlsPlaylists: {
+          '360p': updated.hlsPlaylists?.['360p'] || `/api/stream/${id}/360p.m3u8`,
+          '720p': '',
+          '1080p': '',
+          auto: '',
+        },
+      };
+    }
+  }
+
   res.json({ video: updated, related });
 });
 
@@ -88,39 +117,59 @@ router.post('/upload', authMiddleware, upload.single('video'), async (req: Authe
   }
 });
 
-router.get('/:id/play', (req, res) => {
+router.get('/:id/play', optionalAuthMiddleware, (req: AuthenticatedRequest, res) => {
   const id = parseInt(req.params.id, 10);
   const video = videoRepo.findVideoById(id);
   if (!video) return res.status(404).json({ error: '视频不存在' });
 
   if (video.isPaid) {
+    const userId = req.userId;
     const authHeader = req.headers['x-play-token'] as string | undefined;
-    if (!authHeader) {
-      const userId = (req as AuthenticatedRequest).userId;
-      if (userId) {
-        const existing = hasValidPlayToken(userId, id);
-        if (existing) {
-          return res.json({
-            playlists: video.hlsPlaylists,
-            duration: video.duration,
-            playToken: existing,
-            previewAllowed: false,
-          });
-        }
+
+    let hasFullAccess = false;
+    let returnedPlayToken: PlayAuthToken | null = null;
+
+    if (authHeader) {
+      const vResult = verifyPlayToken(authHeader);
+      if (vResult.valid && vResult.videoId === id) {
+        hasFullAccess = true;
+        const exp = vResult.exp ? vResult.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000;
+        returnedPlayToken = { token: authHeader, videoId: id, expiresAt: exp };
       }
+    }
+
+    if (!hasFullAccess && userId) {
+      const existing = hasValidPlayToken(userId, id);
+      if (existing) {
+        hasFullAccess = true;
+        returnedPlayToken = existing;
+      }
+    }
+
+    if (hasFullAccess) {
       return res.json({
         playlists: video.hlsPlaylists,
         duration: video.duration,
-        previewAllowed: true,
-        previewSeconds: 60,
+        playToken: returnedPlayToken,
+        previewAllowed: false,
+        purchased: true,
       });
     }
+
+    return res.json({
+      playlists: null,
+      duration: video.duration,
+      previewAllowed: true,
+      previewSeconds: 60,
+      purchased: false,
+    });
   }
 
   res.json({
     playlists: video.hlsPlaylists,
     duration: video.duration,
     previewAllowed: false,
+    purchased: true,
   });
 });
 

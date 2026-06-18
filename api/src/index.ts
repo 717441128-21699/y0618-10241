@@ -10,6 +10,8 @@ import { initDatabase } from './database.js';
 import { initWebSocketServer } from './websocket.js';
 import authRouter from './controllers/auth.controller.js';
 import videoRouter from './controllers/video.controller.js';
+import { verifyPlayToken } from './middleware/auth.js';
+import * as videoRepo from './repositories/video.repo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,8 +38,37 @@ async function start() {
   app.use('/api/auth', authRouter);
   app.use('/api/videos', videoRouter);
 
-  app.get('/api/stream/:id/:quality.m3u8', (_req, res) => {
-    const { quality } = _req.params;
+  app.get('/api/stream/:id/:quality.m3u8', (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const quality = req.params.quality;
+    const video = videoRepo.findVideoById(id);
+    if (!video) return res.status(404).json({ error: '视频不存在' });
+
+    if (video.isPaid) {
+      const authHeader = req.headers['x-play-token'] as string | undefined;
+      if (authHeader) {
+        const result = verifyPlayToken(authHeader);
+        if (result.valid && result.videoId === id) {
+          const demoSrc: Record<string, string> = {
+            '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+            '720p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+            '1080p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+          };
+          const target = demoSrc[quality] || demoSrc['720p'];
+          return res.json({ source: target });
+        }
+      }
+
+      if (quality === '360p') {
+        const demoSrc: Record<string, string> = {
+          '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        };
+        return res.json({ source: demoSrc['360p'] });
+      }
+
+      return res.status(403).json({ error: '需要购买该视频才能观看完整内容' });
+    }
+
     const demoSrc: Record<string, string> = {
       '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
       '720p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',

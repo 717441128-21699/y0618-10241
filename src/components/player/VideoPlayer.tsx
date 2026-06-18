@@ -15,12 +15,13 @@ interface VideoPlayerProps {
   previewLimit?: number | null;
   onTimeUpdate: (time: number, duration: number) => void;
   onPreviewReached?: () => void;
+  onAuthFailed?: () => void;
   showControls?: boolean;
 }
 
 export default function VideoPlayer({
   video, playToken, initialTime, danmakus, previewLimit,
-  onTimeUpdate, onPreviewReached
+  onTimeUpdate, onPreviewReached, onAuthFailed
 }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
@@ -55,8 +56,12 @@ export default function VideoPlayer({
         return () => clearTimeout(id);
       }
     },
+    onAuthFailed: () => {
+      onAuthFailed?.();
+    },
     initialTime,
     previewLimit: previewLimit || undefined,
+    playToken,
   });
 
   useEffect(() => {

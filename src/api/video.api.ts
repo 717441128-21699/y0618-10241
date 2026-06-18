@@ -31,9 +31,13 @@ export async function getFeaturedVideos() {
   return res.data;
 }
 
-export async function getVideoDetail(id: number): Promise<VideoDetailResponse> {
+export async function getVideoDetail(id: number, token?: string | null): Promise<VideoDetailResponse> {
   try {
-    const res = await client.get<{ video: Video; related?: Video[] }>(`/videos/${id}`);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-play-token'] = token;
+    }
+    const res = await client.get<{ video: Video; related?: Video[] }>(`/videos/${id}`, { headers });
     return {
       video: res.data.video,
       related: res.data.related || [],
@@ -46,9 +50,13 @@ export async function getVideoDetail(id: number): Promise<VideoDetailResponse> {
   }
 }
 
-export async function getVideoPlayInfo(id: number): Promise<VideoPlayInfoResponse> {
+export async function getVideoPlayInfo(id: number, token?: string | null): Promise<VideoPlayInfoResponse> {
   try {
-    const res = await client.get<VideoPlayInfoResponse>(`/videos/${id}/play`);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['x-play-token'] = token;
+    }
+    const res = await client.get<VideoPlayInfoResponse>(`/videos/${id}/play`, { headers });
     return res.data;
   } catch {
     return {

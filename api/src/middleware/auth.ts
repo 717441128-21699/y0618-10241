@@ -51,11 +51,11 @@ export function generatePlayToken(videoId: number, userId: number, ttlMs = 24 * 
   return { token, expiresAt };
 }
 
-export function verifyPlayToken(token: string): { valid: boolean; videoId?: number; userId?: number } {
+export function verifyPlayToken(token: string): { valid: boolean; videoId?: number; userId?: number; exp?: number } {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { type: string; videoId: number; userId: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { type: string; videoId: number; userId: number; exp: number };
     if (decoded.type !== 'play') return { valid: false };
-    return { valid: true, videoId: decoded.videoId, userId: decoded.userId };
+    return { valid: true, videoId: decoded.videoId, userId: decoded.userId, exp: decoded.exp };
   } catch {
     return { valid: false };
   }
