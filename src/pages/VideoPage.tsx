@@ -52,9 +52,10 @@ export default function VideoPage() {
     setLoading(true);
     setError(null);
     setPlayToken(null);
+    const currentUserId = user?.id;
 
     try {
-      const cachedForDetail = getPlayToken(videoId);
+      const cachedForDetail = getPlayToken(videoId, currentUserId);
       const [detailRes, danmakuRes] = await Promise.all([
         getVideoDetail(videoId, cachedForDetail?.token),
         getDanmakuList(videoId),
@@ -70,7 +71,7 @@ export default function VideoPage() {
       let serverPlayToken: PlayAuthToken | null = null;
 
       if (detailRes.video.isPaid) {
-        const cached = getPlayToken(videoId);
+        const cached = getPlayToken(videoId, currentUserId);
         let info;
 
         try {
@@ -79,13 +80,23 @@ export default function VideoPage() {
 
           if (info.playToken && info.playToken.expiresAt > Date.now()) {
             serverPlayToken = info.playToken;
-            savePlayToken(info.playToken);
+            savePlayToken({
+              videoId: info.playToken.videoId,
+              token: info.playToken.token,
+              expiresAt: info.playToken.expiresAt,
+              userId: currentUserId,
+            });
           } else if (cached && cached.expiresAt > Date.now()) {
             try {
               const verifyInfo = await getVideoPlayInfo(videoId, cached.token);
               if (verifyInfo.playToken && verifyInfo.playToken.expiresAt > Date.now()) {
                 serverPlayToken = verifyInfo.playToken;
-                savePlayToken(verifyInfo.playToken);
+                savePlayToken({
+                  videoId: verifyInfo.playToken.videoId,
+                  token: verifyInfo.playToken.token,
+                  expiresAt: verifyInfo.playToken.expiresAt,
+                  userId: currentUserId,
+                });
                 serverPurchased = true;
               } else {
                 clearPlayToken(videoId);
@@ -107,7 +118,7 @@ export default function VideoPage() {
       }
 
       if (isAuthenticated) {
-        const cachedForLike = getPlayToken(videoId);
+        const cachedForLike = getPlayToken(videoId, currentUserId);
         try {
           const prog = await getProgress(videoId);
           if (prog && prog.position > 5 && prog.position < (detailRes.video.duration || 999999) - 10) {
@@ -128,11 +139,21 @@ export default function VideoPage() {
     } finally {
       setLoading(false);
     }
-  }, [videoId, isAuthenticated]);
+  }, [videoId, isAuthenticated, user?.id]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (videoId && video?.isPaid && user?.id && playToken) {
+      const rec = getPlayToken(videoId, user.id);
+      if (!rec) {
+        clearPlayToken(videoId);
+        setPlayToken(null);
+      }
+    }
+  }, [user?.id, videoId, video?.isPaid, playToken]);
 
   useEffect(() => {
     const unsub = onMessage((msg) => {
@@ -146,12 +167,17 @@ export default function VideoPage() {
         const t = msg.payload as PlayAuthToken;
         if (t.videoId === videoId) {
           setPlayToken(t);
-          savePlayToken(t);
+          savePlayToken({
+            videoId: t.videoId,
+            token: t.token,
+            expiresAt: t.expiresAt,
+            userId: user?.id,
+          });
         }
       }
     });
     return unsub;
-  }, [videoId, onMessage]);
+  }, [videoId, onMessage, user?.id]);
 
   const handleAuthFailed = useCallback(() => {
     clearPlayToken(videoId);
@@ -188,7 +214,12 @@ export default function VideoPage() {
   const handlePurchase = useCallback(async (method: 'alipay' | 'wechat' | 'card'): Promise<PlayAuthToken> => {
     const res = await purchaseVideo(videoId, method);
     setPlayToken(res);
-    savePlayToken(res);
+    savePlayToken({
+      videoId: res.videoId,
+      token: res.token,
+      expiresAt: res.expiresAt,
+      userId: user?.id,
+    });
 
     setTimeout(async () => {
       try {
@@ -200,7 +231,7 @@ export default function VideoPage() {
     }, 300);
 
     return res;
-  }, [videoId]);
+  }, [videoId, user?.id]);
 
   const handleLike = async () => {
     if (!isAuthenticated) {

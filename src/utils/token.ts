@@ -24,6 +24,7 @@ export function clearAccessToken(): void {
 interface PlayTokenRecord {
   token: string;
   expiresAt: number;
+  userId?: number;
 }
 
 function readPlayTokens(): Record<number, PlayTokenRecord> {
@@ -42,7 +43,7 @@ function writePlayTokens(tokens: Record<number, PlayTokenRecord>): void {
   } catch { /* ignore */ }
 }
 
-export function getPlayToken(videoId: number): PlayTokenRecord | null {
+export function getPlayToken(videoId: number, currentUserId?: number): PlayTokenRecord | null {
   const all = readPlayTokens();
   const rec = all[videoId];
   if (!rec) return null;
@@ -51,27 +52,31 @@ export function getPlayToken(videoId: number): PlayTokenRecord | null {
     writePlayTokens(all);
     return null;
   }
+  if (currentUserId !== undefined && rec.userId !== undefined && rec.userId !== currentUserId) {
+    return null;
+  }
   return rec;
 }
 
-export function savePlayToken(token: { videoId: number; token: string; expiresAt: number }): void;
-export function savePlayToken(videoId: number, token: string, expiresAt: number): void;
+export function savePlayToken(token: { videoId: number; token: string; expiresAt: number; userId?: number }): void;
+export function savePlayToken(videoId: number, token: string, expiresAt: number, userId?: number): void;
 export function savePlayToken(
-  videoIdOrObj: number | { videoId: number; token: string; expiresAt: number },
+  videoIdOrObj: number | { videoId: number; token: string; expiresAt: number; userId?: number },
   maybeToken?: string,
   maybeExpiresAt?: number,
+  maybeUserId?: number,
 ): void {
   const all = readPlayTokens();
   if (typeof videoIdOrObj === 'number') {
-    all[videoIdOrObj] = { token: maybeToken || '', expiresAt: maybeExpiresAt || 0 };
+    all[videoIdOrObj] = { token: maybeToken || '', expiresAt: maybeExpiresAt || 0, userId: maybeUserId };
   } else {
-    all[videoIdOrObj.videoId] = { token: videoIdOrObj.token, expiresAt: videoIdOrObj.expiresAt };
+    all[videoIdOrObj.videoId] = { token: videoIdOrObj.token, expiresAt: videoIdOrObj.expiresAt, userId: videoIdOrObj.userId };
   }
   writePlayTokens(all);
 }
 
-export function setPlayToken(videoId: number, token: string, expiresAt: number): void {
-  savePlayToken(videoId, token, expiresAt);
+export function setPlayToken(videoId: number, token: string, expiresAt: number, userId?: number): void {
+  savePlayToken(videoId, token, expiresAt, userId);
 }
 
 export function clearPlayToken(videoId: number): void {
@@ -82,4 +87,15 @@ export function clearPlayToken(videoId: number): void {
 
 export function clearAllPlayTokens(): void {
   writePlayTokens({});
+}
+
+export function clearPlayTokensByUserId(userId: number): void {
+  const all = readPlayTokens();
+  const filtered: Record<number, PlayTokenRecord> = {};
+  for (const [k, v] of Object.entries(all)) {
+    if (v.userId !== undefined && v.userId !== userId) {
+      filtered[Number(k)] = v;
+    }
+  }
+  writePlayTokens(filtered);
 }

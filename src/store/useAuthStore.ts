@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { User, AuthResponse, LoginRequest, RegisterRequest } from '../../shared/types';
-import { getAccessToken, setAccessToken, clearAccessToken } from '../utils/token';
+import { getAccessToken, setAccessToken, clearAccessToken, clearAllPlayTokens } from '../utils/token';
 import client from '../api/client';
 
 interface AuthState {
@@ -35,6 +35,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await client.post<AuthResponse>('/auth/login', req);
       const { user, accessToken } = res.data;
+      clearAllPlayTokens();
       setAccessToken(accessToken);
       set({ user, accessToken, isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -59,6 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await client.post<AuthResponse>('/auth/register', req);
       const { user, accessToken } = res.data;
+      clearAllPlayTokens();
       setAccessToken(accessToken);
       set({ user, accessToken, isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -72,17 +74,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     clearAccessToken();
+    clearAllPlayTokens();
     set({ user: null, accessToken: null, isAuthenticated: false });
   },
 
   initAuth: async () => {
     const token = get().accessToken;
+    const prevUserId = get().user?.id;
     if (!token) return;
     try {
       const res = await client.get<{ user: User }>('/auth/me');
-      set({ user: res.data.user });
+      const newUser = res.data.user;
+      if (prevUserId && prevUserId !== newUser.id) {
+        clearAllPlayTokens();
+      }
+      set({ user: newUser });
     } catch {
       clearAccessToken();
+      clearAllPlayTokens();
       set({ user: null, accessToken: null, isAuthenticated: false });
     }
   },
