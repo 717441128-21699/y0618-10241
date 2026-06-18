@@ -32,8 +32,16 @@ export default function VideoPlayer({
 
   const { danmakuEnabled, playbackRate, resolution, volume, muted } = usePlayerStore();
 
+  const isPreviewOnly = video.isPaid && !playToken;
+
+  const effectiveResolution = isPreviewOnly
+    ? '360p'
+    : resolution;
+
   const src = video.hlsPlaylists
-    ? (resolution === 'auto' ? video.hlsPlaylists.auto : video.hlsPlaylists[resolution as '360p' | '720p' | '1080p'])
+    ? (effectiveResolution === 'auto'
+        ? video.hlsPlaylists.auto
+        : video.hlsPlaylists[effectiveResolution as '360p' | '720p' | '1080p']) || video.hlsPlaylists?.['360p'] || ''
     : '';
 
   const {

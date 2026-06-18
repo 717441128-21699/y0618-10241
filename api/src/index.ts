@@ -12,6 +12,7 @@ import authRouter from './controllers/auth.controller.js';
 import videoRouter from './controllers/video.controller.js';
 import { verifyPlayToken } from './middleware/auth.js';
 import * as videoRepo from './repositories/video.repo.js';
+import { hasValidPlayToken } from './services/payment.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,38 +45,41 @@ async function start() {
     const video = videoRepo.findVideoById(id);
     if (!video) return res.status(404).json({ error: '视频不存在' });
 
+    const FULL_VIDEO = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+    const PREVIEW_VIDEO = 'https://test-streams.mux.dev/pts_shift/master.m3u8';
+
     if (video.isPaid) {
       const authHeader = req.headers['x-play-token'] as string | undefined;
       if (authHeader) {
         const result = verifyPlayToken(authHeader);
-        if (result.valid && result.videoId === id) {
-          const demoSrc: Record<string, string> = {
-            '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-            '720p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-            '1080p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-          };
-          const target = demoSrc[quality] || demoSrc['720p'];
-          return res.json({ source: target });
+        if (result.valid && result.videoId === id && result.userId) {
+          const purchased = hasValidPlayToken(result.userId, id);
+          if (purchased) {
+            const demoSrc: Record<string, string> = {
+              '360p': FULL_VIDEO,
+              '720p': FULL_VIDEO,
+              '1080p': FULL_VIDEO,
+            };
+            const target = demoSrc[quality] || demoSrc['720p'];
+            return res.json({ source: target, fullAccess: true });
+          }
         }
       }
 
       if (quality === '360p') {
-        const demoSrc: Record<string, string> = {
-          '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-        };
-        return res.json({ source: demoSrc['360p'] });
+        return res.json({ source: PREVIEW_VIDEO, fullAccess: false, previewSeconds: 60 });
       }
 
       return res.status(403).json({ error: '需要购买该视频才能观看完整内容' });
     }
 
     const demoSrc: Record<string, string> = {
-      '360p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-      '720p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-      '1080p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+      '360p': FULL_VIDEO,
+      '720p': FULL_VIDEO,
+      '1080p': FULL_VIDEO,
     };
     const target = demoSrc[quality] || demoSrc['720p'];
-    res.json({ source: target });
+    res.json({ source: target, fullAccess: true });
   });
 
   app.use('/api/*', (_req, res) => {

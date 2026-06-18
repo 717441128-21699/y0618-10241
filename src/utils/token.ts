@@ -79,3 +79,7 @@ export function clearPlayToken(videoId: number): void {
   delete all[videoId];
   writePlayTokens(all);
 }
+
+export function clearAllPlayTokens(): void {
+  writePlayTokens({});
+}

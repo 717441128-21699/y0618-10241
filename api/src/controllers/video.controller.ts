@@ -67,7 +67,10 @@ router.get('/:id', optionalAuthMiddleware, (req: AuthenticatedRequest, res) => {
     const authHeader = req.headers['x-play-token'] as string | undefined;
     if (authHeader) {
       const vResult = verifyPlayToken(authHeader);
-      if (vResult.valid && vResult.videoId === id) hasAccess = true;
+      if (vResult.valid && vResult.videoId === id && vResult.userId) {
+        const dbCheck = hasValidPlayToken(vResult.userId, id);
+        if (dbCheck) hasAccess = true;
+      }
     }
 
     if (!hasAccess) {
@@ -131,10 +134,13 @@ router.get('/:id/play', optionalAuthMiddleware, (req: AuthenticatedRequest, res)
 
     if (authHeader) {
       const vResult = verifyPlayToken(authHeader);
-      if (vResult.valid && vResult.videoId === id) {
-        hasFullAccess = true;
-        const exp = vResult.exp ? vResult.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000;
-        returnedPlayToken = { token: authHeader, videoId: id, expiresAt: exp };
+      if (vResult.valid && vResult.videoId === id && vResult.userId) {
+        const dbCheck = hasValidPlayToken(vResult.userId, id);
+        if (dbCheck) {
+          hasFullAccess = true;
+          const exp = vResult.exp ? vResult.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000;
+          returnedPlayToken = { token: authHeader, videoId: id, expiresAt: exp };
+        }
       }
     }
 
@@ -157,7 +163,12 @@ router.get('/:id/play', optionalAuthMiddleware, (req: AuthenticatedRequest, res)
     }
 
     return res.json({
-      playlists: null,
+      playlists: {
+        '360p': `/api/stream/${id}/360p.m3u8`,
+        '720p': '',
+        '1080p': '',
+        auto: '',
+      },
       duration: video.duration,
       previewAllowed: true,
       previewSeconds: 60,
